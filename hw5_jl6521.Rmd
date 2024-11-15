@@ -1,0 +1,173 @@
+---
+title: "hw5_jl6521"
+author: "Jiayi"
+date: "2024-11-10"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(rvest)
+library(broom)
+library(purrr)
+```
+
+## Problem1
+```{r birthday problem}
+birthday = function(group_size) {
+  day = sample(1:365, group_size, replace = TRUE)
+  return(length(day)!= length(unique(day)))
+}
+
+group_sizes = 2:50
+results = tibble(group_size = group_sizes, prob = NA)
+for (i in seq_along(group_sizes)) {
+  same_birth = sum(replicate(10000,birthday(group_sizes[i])))
+  prob <- same_birth / 10000
+  results$prob[i] <- prob
+}
+
+ggplot(results, aes(x = group_size, y = prob)) +
+  geom_line() +
+  geom_point() +
+  labs(x = "group size", y = "probability of shared birthday",
+       title = "Probability of shared birthday with group size") +
+  theme_minimal()
+```
+Comment: from the graph, we can see that as group size increases (closer to 50), the probability of duplicated birthday in the group increases. Eventually as the group size be closer to 50, the probability is closer to 1.
+## Problem2
+```{r 2-1: save 𝜇̂ and the p-value}
+
+sim_p_true = function(true_mean){
+  data = rnorm(30, mean = true_mean, sd = 5)
+  test = t.test(data, mu=0)
+  result = broom::tidy(test)
+  result_df = result %>% 
+    select(mu_hat = estimate, p_value = p.value) 
+  return (result_df)
+}
+
+test_results = expand_grid(
+  true_mean = 1:7,
+  iter = 1:5000
+) %>% 
+  mutate(simulation = map(true_mean, sim_p_true)) %>%
+  unnest(simulation)
+
+print(test_results)
+```
+
+```{r 2-2: plot showing the proportion of times the null was rejected}
+
+power_results = test_results %>%
+  group_by(true_mean) %>%
+  summarize(power = mean(p_value < 0.05))
+
+ggplot(power_results, aes(x = true_mean, y = power)) +
+  geom_line() +
+  geom_point() +
+  labs(
+    title = "Proportion of times the null was rejected ",
+    x = "true mean (effect size)",
+    y = "power"
+  ) +
+  theme_minimal()
+```
+Comment: From the graph, we can see that the power increases as true mean increases and eventually be closer to 1.
+
+```{r 2-3}
+
+average_mu_hat <- test_results %>%
+  group_by(true_mean) %>%
+  summarize(
+    avg_mu_hat_all = mean(mu_hat),
+    avg_mu_hat_rejected = mean(mu_hat[p_value < 0.05])
+  )
+
+ggplot(average_mu_hat, aes(x = true_mean)) +
+  geom_line(aes(y = avg_mu_hat_all, color = "All samples")) +
+  geom_point(aes(y = avg_mu_hat_all, color = "All samples")) +
+  geom_line(aes(y = avg_mu_hat_rejected, color = "Rejected null")) +
+  geom_point(aes(y = avg_mu_hat_rejected, color = "Rejected null")) +
+  labs(
+    title = "Average estimate of mu hat vs true mu",
+    x = "True mean",
+    y = "Average estimate of mu hat",
+    color = "Sample group"
+  ) +
+  theme_minimal()
+```
+Comment: the sample average of 𝜇̂ across tests for which the null is rejected is slightly larger to the all samples when the true mean is small. This is because 𝜇̂ values are skewed towards higher estimates when  we reject null hypothesis with larger deviation from 0.
+
+## Problem3
+```{r 3-1}
+library(readr)
+url = "https://raw.githubusercontent.com/washingtonpost/data-homicides/master/homicide-data.csv"
+homicide_data = read_csv(url) %>% 
+  janitor::clean_names() %>% 
+  mutate(
+    city_state = str_c(city,", ",state)
+  ) 
+
+summary_homocide = homicide_data %>% 
+  group_by(city_state) %>% 
+  summarize(
+    total_homicides = n(),
+    unsolved_homicides = sum(disposition %in% c("Closed without arrest", "Open/No arrest",na.rm = TRUE)))
+
+```
+Comment: The dataset provides *r nrows(homicide_data)* criminal homicides over the past decade in 50 of the largest American cities. There are report dates, demographic information of victim name, race, age, and sex, location information of city, state, and latitude and longitude, as well as the whether an arrest was made. 
+
+```{r 3-2}
+baltimore_data <- summary_homocide %>%
+  filter(city_state == "Baltimore, MD") 
+
+
+prop_test_result = prop.test(
+  x = baltimore_data %>% pull(unsolved_homicides),
+  n = baltimore_data %>% pull(total_homicides)) %>% 
+  broom::tidy()
+
+result_prop_df = prop_test_result %>% 
+    select(estimate, conf.low, conf.high)
+
+print(result_prop_df)
+```
+
+```{r each city}
+prop_test_function <- function(unsolved, total) {
+  prop_test_result <- prop.test(x = unsolved, n = total) %>% 
+    broom::tidy() %>% 
+    select(estimate, conf.low, conf.high) %>% 
+  return(prop_test_result)
+}
+
+prop_test_results <- summary_homocide %>%
+  mutate(
+    test_summary = map2(unsolved_homicides, total_homicides, prop_test_function)
+  ) %>%
+  unnest(test_summary) %>%
+  rename(proportion = estimate)
+
+print(prop_test_results)
+```
+
+```{r plot}
+
+
+ggplot(prop_test_results, aes(x = reorder(city_state, -proportion), y = proportion)) +
+  geom_point() +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = 0.3) +
+  coord_flip() +
+  labs(
+    title = "Proportion of unsolved homicides by city",
+    x = "City",
+    y = "Proportion of unsolved homicides"
+  ) +
+  theme_minimal()
+```
+
+
+
+
