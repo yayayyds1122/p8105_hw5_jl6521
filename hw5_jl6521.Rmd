@@ -11,6 +11,9 @@ library(tidyverse)
 library(rvest)
 library(broom)
 library(purrr)
+library(dplyr)
+library(tidyr)
+set.seed(1)
 ```
 
 ## Problem1
@@ -36,26 +39,26 @@ ggplot(results, aes(x = group_size, y = prob)) +
   theme_minimal()
 ```
 Comment: from the graph, we can see that as group size increases (closer to 50), the probability of duplicated birthday in the group increases. Eventually as the group size be closer to 50, the probability is closer to 1.
+
 ## Problem2
 ```{r 2-1: save 𝜇̂ and the p-value}
-
+set.seed(1)
 sim_p_true = function(true_mean){
   data = rnorm(30, mean = true_mean, sd = 5)
   test = t.test(data, mu=0)
   result = broom::tidy(test)
   result_df = result %>% 
-    select(mu_hat = estimate, p_value = p.value) 
+    dplyr::select(mu_hat = estimate, p_value = p.value) 
   return (result_df)
 }
 
 test_results = expand_grid(
-  true_mean = 1:7,
+  true_mean = 0:6,
   iter = 1:5000
 ) %>% 
   mutate(simulation = map(true_mean, sim_p_true)) %>%
-  unnest(simulation)
-
-print(test_results)
+  unnest(simulation) %>% 
+  mutate(indicator = as.numeric(p_value < 0.05))
 ```
 
 ```{r 2-2: plot showing the proportion of times the null was rejected}
@@ -74,10 +77,9 @@ ggplot(power_results, aes(x = true_mean, y = power)) +
   ) +
   theme_minimal()
 ```
-Comment: From the graph, we can see that the power increases as true mean increases and eventually be closer to 1.
+Comment: From the graph, we can see that the power increases as true mean increases and eventually be closer to 1. As the effect size increases, the power would increase.
 
 ```{r 2-3}
-
 average_mu_hat <- test_results %>%
   group_by(true_mean) %>%
   summarize(
@@ -98,9 +100,10 @@ ggplot(average_mu_hat, aes(x = true_mean)) +
   ) +
   theme_minimal()
 ```
-Comment: the sample average of 𝜇̂ across tests for which the null is rejected is slightly larger to the all samples when the true mean is small. This is because 𝜇̂ values are skewed towards higher estimates when  we reject null hypothesis with larger deviation from 0.
+Comment: the gragh shows the average estimate of μ across all samples and for samples where the null hypothesis was rejected. Sample average of 𝜇̂ across tests for which the null is rejected is larger to the all samples for smaller effect size. This is because 𝜇̂ values are skewed towards higher estimates when  we reject null hypothesis. Some tests might be rejected purely by chance. As mu increases, the power improves, and bias would be reduced, and the difference becomes smaller. 
 
-## Problem3
+
+## Problem 3
 ```{r 3-1}
 library(readr)
 url = "https://raw.githubusercontent.com/washingtonpost/data-homicides/master/homicide-data.csv"
@@ -108,16 +111,23 @@ homicide_data = read_csv(url) %>%
   janitor::clean_names() %>% 
   mutate(
     city_state = str_c(city,", ",state)
-  ) 
+  ) %>% 
+  filter(city_state !="Tulsa, AL")
 
+
+```
+
+```{r}
 summary_homocide = homicide_data %>% 
   group_by(city_state) %>% 
   summarize(
     total_homicides = n(),
-    unsolved_homicides = sum(disposition %in% c("Closed without arrest", "Open/No arrest",na.rm = TRUE)))
+    unsolved_homicides = sum(disposition %in% c("Closed without arrest", "Open/No arrest",na.rm = TRUE)))%>% 
+  filter(city_state !="Tulsa, AL")
 
+summary_homocide |> knitr::kable()
 ```
-Comment: The dataset provides *r nrows(homicide_data)* criminal homicides over the past decade in 50 of the largest American cities. There are report dates, demographic information of victim name, race, age, and sex, location information of city, state, and latitude and longitude, as well as the whether an arrest was made. 
+Comment: The dataset provides *r nrows(homicide_data)* criminal homicides over the past decade in 50 of the largest American cities. There are report dates, demographic information of victim name, race, age, and sex, location information of city, state, and latitude and longitude, as well as the whether an arrest was made. Tulsa, AL is deleted because of the data entry error.
 
 ```{r 3-2}
 baltimore_data <- summary_homocide %>%
@@ -129,10 +139,10 @@ prop_test_result = prop.test(
   n = baltimore_data %>% pull(total_homicides)) %>% 
   broom::tidy()
 
-result_prop_df = prop_test_result %>% 
-    select(estimate, conf.low, conf.high)
+#result_prop_df = prop_test_result %>% 
+ #   select(estimate, conf.low, conf.high)
 
-print(result_prop_df)
+prop_test_result %>% knitr::kable()
 ```
 
 ```{r each city}
@@ -150,22 +160,20 @@ prop_test_results <- summary_homocide %>%
   unnest(test_summary) %>%
   rename(proportion = estimate)
 
-print(prop_test_results)
+prop_test_results %>% knitr::kable()
 ```
 
 ```{r plot}
-
-
 ggplot(prop_test_results, aes(x = reorder(city_state, -proportion), y = proportion)) +
   geom_point() +
-  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = 0.3) +
-  coord_flip() +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high)) +
   labs(
     title = "Proportion of unsolved homicides by city",
     x = "City",
     y = "Proportion of unsolved homicides"
   ) +
-  theme_minimal()
+  theme_minimal()+
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
 ```
 
 
